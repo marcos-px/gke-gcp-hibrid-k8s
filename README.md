@@ -48,6 +48,7 @@ A aplicação roda no GKE com os seguintes componentes por pod:
 - **NetworkPolicy**: deny-all por padrão, com liberações explícitas:
   - Ingress: aceita tráfego apenas do namespace `ingress-nginx` na porta 8080
   - Egress: DNS (53/UDP+TCP), Cloud SQL Proxy local (5432) e HTTPS externo (443)
+-Control plane endpoint is public but restricted via master_authorized_networks_config. In production, use enable_private_endpoint = true with a Cloud Build private pool or Connect Gateway for CI/CD access.
 
 ### Alta Disponibilidade
 
