@@ -1,0 +1,66 @@
+name: Deploy to GKE
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy"
+        required: true
+      environment:
+        description: "Target environment"
+        required: true
+        default: "develop"
+  repository_dispatch:
+    types: [deploy]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy ${{ github.event.inputs.environment || github.event.client_payload.environment }}
+    runs-on: ubuntu-latest
+
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment || github.event.client_payload.environment }}
+      IMAGE_TAG: ${{ github.event.inputs.image_tag || github.event.client_payload.image_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA_EMAIL }}
+
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.GKE_CLUSTER_NAME }}
+          location: ${{ secrets.GCP_REGION }}
+          project_id: ${{ secrets.GCP_SERVICE_PROJECT }}
+
+      - uses: imranismail/setup-kustomize@v2
+
+      - name: Update image tag
+        run: |
+          cd overlays/${{ env.ENVIRONMENT }}
+          kustomize edit set image \
+            "REGION-docker.pkg.dev/PROJECT_ID/app-images/hybrid-api=${{ secrets.ARTIFACT_REGISTRY_URL }}/hybrid-api:${{ env.IMAGE_TAG }}"
+
+      - name: Commit updated kustomization
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add overlays/${{ env.ENVIRONMENT }}/kustomization.yaml
+          git diff --staged --quiet || git commit -m "chore: deploy ${{ env.IMAGE_TAG }} to ${{ env.ENVIRONMENT }}"
+          git push
+
+      - name: Apply manifests
+        run: kubectl apply -k overlays/${{ env.ENVIRONMENT }}
+
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/hybrid-api -n app --timeout=300s
+
+      - name: Verify pods
+        run: kubectl get pods -n app -l app=hybrid-api
